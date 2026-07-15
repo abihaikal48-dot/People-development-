@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --red: #C0392B;
+  --red-dark: #8E2A1F;
+  --yellow: #F4B400;
+  --ink: #1E1E1E;
+  --bg: #F6F5F3;
+  --card: #FFFFFF;
+  --border: #E7E3DE;
+  --muted: #8A8580;
+  --ok: #2E7D32;
+  --warn: #C77700;
+  --bad: #C0392B;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(.92) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes floatY {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-9px); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.fade-in {
+  animation: fadeSlideIn 0.38s cubic-bezier(.2, .8, .2, 1);
+}
+
+.float-slow {
+  animation: floatY 4.6s ease-in-out infinite;
+}
+
+.float-med {
+  animation: floatY 3.7s ease-in-out infinite;
+  animation-delay: 0.25s;
+}
+
+.float-fast {
+  animation: floatY 3.1s ease-in-out infinite;
+  animation-delay: 0.5s;
+}
+
+/* Custom table styling to preserve design spec exactly */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  background-color: #FBF3F1;
+  color: var(--red-dark);
+  text-align: left;
+  padding: 12px 10px;
+  font-weight: 700;
+  border-bottom: 2px solid var(--border);
+}
+
+td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tr:hover td {
+  background-color: #FAFAF9;
+}
+
+.dark tr:hover td {
+  background-color: #26221E;
+}
+
+/* Dark mode standard overrides */
+.dark {
+  --bg: #181614;
+  --card: #221F1C;
+  --border: #332F2B;
+  --ink: #F1EDE9;
+  --muted: #A79E96;
+}
+
+.dark th {
+  background-color: #2A2521;
+  color: #F4B400;
+}
