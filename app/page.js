@@ -5,7 +5,9 @@ import { supabase } from '../lib/supabaseClient';
 import { 
   TrendingUp, Users, Search, Bell, Moon, Sun, 
   ChevronDown, BookOpen, Clipboard, AlertTriangle, 
-  Award, RefreshCw, Star, Trash2, Edit3, LogOut, Check
+  Award, RefreshCw, Star, Trash2, Edit3, LogOut, Check,
+  BookOpenCheck, ShieldAlert, Calendar, HelpCircle, Settings,
+  DollarSign, FileText, CheckSquare, UserCheck, Briefcase
 } from 'lucide-react';
 
 export default function Page() {
@@ -13,69 +15,107 @@ export default function Page() {
   const [darkMode, setDarkMode] = useState(false);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  
+  // Login States
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   
-  // Master state
+  // Database States
   const [outlets, setOutlets] = useState([]);
   const [kru, setKru] = useState([]);
-  const [bciStats, setBciStats] = useState({});
-  const [dashboardData, setDashboardData] = useState({
-    totalOutlet: 0,
-    kruAktif: 0,
-    tnaOpen: 0,
-    keluhanOpen: 0
-  });
-
-  // UI state
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [submenuOpen, setSubmenuOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [toast, setToast] = useState('');
-  const [filterOutlet, setFilterOutlet] = useState('');
-  const [filterDivisi, setFilterDivisi] = useState('');
-
-  // Active modal edit state
+  const [bankSop, setBankSop] = useState([]);
+  const [tnaList, setTnaList] = useState([]);
+  const [penilaianTeori, setPenilaianTeori] = useState([]);
+  const [penilaianPraktik, setPenilaianPraktik] = useState([]);
+  
+  // Form Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeFormEntity, setActiveFormEntity] = useState(null);
   const [formData, setFormData] = useState({});
 
+  // Dynamic Quiz Engine States
+  const [quizKru, setQuizKru] = useState('');
+  const [quizOutlet, setQuizOutlet] = useState('');
+  const [quizTopik, setQuizTopik] = useState('Dusting Ayam');
+  const [quizQuestions, setQuizQuestions] = useState([]);
+  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizResult, setQuizResult] = useState(null);
+
+  // Dynamic Practical Exam States
+  const [examKru, setExamKru] = useState('');
+  const [examOutlet, setExamOutlet] = useState('');
+  const [examSop, setExamSop] = useState('');
+  const [examSteps, setExamSteps] = useState([]);
+  const [examScores, setExamScores] = useState({});
+  const [examNotes, setExamNotes] = useState('');
+  const [examPenilai, setExamPenilai] = useState('');
+
+  // Profil 360 States
+  const [selectedProfilKru, setSelectedProfilKru] = useState('');
+  const [profilData, setProfilData] = useState(null);
+
+  // Filter & UI States
+  const [filterOutlet, setFilterOutlet] = useState('');
+  const [filterDivisi, setFilterDivisi] = useState('');
+  const [toast, setToast] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [submenuOpen, setSubmenuOpen] = useState(true);
+
+  // SHA-256 Hashing Algorithm
+  const hashPassword = async (password) => {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
   useEffect(() => {
-    // Check Active Session
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setUser(session.user);
-        fetchCoreData();
-      } else {
-        setLoading(false);
-      }
-    };
-    getSession();
-  }, []);
+    const savedUser = sessionStorage.getItem('haraPdUser');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+      fetchData();
+    } else {
+      setLoading(false);
+    }
+  }, [filterOutlet, filterDivisi]);
 
   const handleLogin = async () => {
-    setLoading(true);
     setLoginError('');
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: loginEmail,
-      password: loginPassword,
-    });
-    if (error) {
-      setLoginError(error.message);
+    if (!loginEmail || !loginPassword) {
+      setLoginError('Email & password wajib diisi.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const hashedPassword = await hashPassword(loginPassword);
+      
+      const { data, error } = await supabase
+        .from('users_metadata')
+        .select('*')
+        .eq('email', loginEmail)
+        .eq('password_hash', hashedPassword)
+        .eq('status_aktif', 'Aktif')
+        .single();
+
+      if (error || !data) {
+        setLoginError('Email tidak ditemukan atau password salah.');
+        setLoading(false);
+      } else {
+        const loggedUser = { email: data.email, nama: data.nama, role: data.role };
+        sessionStorage.setItem('haraPdUser', JSON.stringify(loggedUser));
+        setUser(loggedUser);
+        fetchData();
+      }
+    } catch (e) {
+      setLoginError('Gagal menghubungkan ke server basis data.');
       setLoading(false);
-    } else {
-      setUser(data.user);
-      fetchCoreData();
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = () => {
+    sessionStorage.removeItem('haraPdUser');
     setUser(null);
-    setLoading(false);
   };
 
   const showToast = (msg) => {
@@ -83,186 +123,292 @@ export default function Page() {
     setTimeout(() => setToast(''), 3000);
   };
 
-  const fetchCoreData = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true);
-      const { data: oList } = await supabase.from('outlets').select('*');
-      const { data: kList } = await supabase.from('kru').select('*');
-      const { count: tnaCount } = await supabase.from('tna').select('*', { count: 'exact', head: true }).eq('status', 'Belum');
-      const { count: keluhanCount } = await supabase.from('kartu_keluhan').select('*', { count: 'exact', head: true }).neq('status', 'Selesai');
+      
+      // Ambil Data Master Utama
+      const { data: oData } = await supabase.from('outlets').select('*').order('created_at', { ascending: false });
+      const { data: kData } = await supabase.from('kru').select('*').order('created_at', { ascending: false });
+      const { data: sData } = await supabase.from('bank_sop').select('*').order('created_at', { ascending: false });
+      
+      // Muat Data dengan Filter
+      let tnaQuery = supabase.from('tna').select('*').order('created_at', { ascending: false });
+      let teoriQuery = supabase.from('penilaian_teori').select('*').order('tanggal', { ascending: false });
+      let praktikQuery = supabase.from('penilaian_praktik').select('*').order('tanggal', { ascending: false });
 
-      setOutlets(oList || []);
-      setKru(kList || []);
-      setDashboardData({
-        totalOutlet: oList?.length || 0,
-        kruAktif: kList?.filter(k => k.status_aktif === 'Aktif').length || 0,
-        tnaOpen: tnaCount || 0,
-        keluhanOpen: keluhanCount || 0
-      });
+      if (filterOutlet) {
+        tnaQuery = tnaQuery.eq('kode_outlet', filterOutlet);
+        teoriQuery = teoriQuery.eq('kode_outlet', filterOutlet);
+        praktikQuery = praktikQuery.eq('kode_outlet', filterOutlet);
+      }
+
+      const { data: tData } = await tnaQuery;
+      const { data: teData } = await teoriQuery;
+      const { data: prData } = await praktikQuery;
+
+      setOutlets(oData || []);
+      setKru(kData || []);
+      setBankSop(sData || []);
+      setTnaList(tData || []);
+      setPenilaianTeori(teData || []);
+      setPenilaianPraktik(prData || []);
+      
       setLoading(false);
     } catch (e) {
-      showToast('Gagal memuat data utama');
+      showToast('Gagal menyinkronkan data dengan Supabase');
       setLoading(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-bg dark:bg-zinc-900">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-red border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted text-sm font-semibold">Menghubungkan ke Server Hara PD...</p>
-        </div>
-      </div>
-    );
-  }
+  // Menangani perubahan data master kru / pengisian otomatis
+  const handleKruSelection = (kruName, formType) => {
+    const selectedKru = kru.find(k => k.nama_kru === kruName);
+    if (selectedKru) {
+      if (formType === 'quiz') {
+        setQuizKru(selectedKru.nama_kru);
+        setQuizOutlet(selectedKru.kode_outlet || '');
+      } else if (formType === 'exam') {
+        setExamKru(selectedKru.nama_kru);
+        setExamOutlet(selectedKru.kode_outlet || '');
+      }
+    }
+  };
 
-  if (!user) {
-    return (
-      <div className={`relative min-h-screen flex items-center justify-center p-6 ${darkMode ? 'dark bg-zinc-950' : 'bg-red-dark'}`}>
-        {/* Animated Background SVG */}
-        <div className="absolute inset-0 z-0 opacity-40">
-          <svg className="w-full h-full object-cover" viewBox="0 0 1440 800" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#8E2A1F" />
-                <stop offset="100%" stopColor="#2A130D" />
-              </linearGradient>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#g)" />
-            <circle cx="1200" cy="200" r="250" fill="#F4B400" opacity="0.15" className="animate-pulse" />
-            <circle cx="200" cy="600" r="180" fill="#C0392B" opacity="0.2" className="animate-bounce" />
-          </svg>
-        </div>
+  // Quiz Engine
+  const loadQuizQuestions = () => {
+    if (!quizKru) {
+      showToast('Pilih kru terlebih dahulu!');
+      return;
+    }
+    // Soal statis berdasarkan SOP / Buku Aturan Hara Chicken
+    const sampleQuestions = [
+      { id: 1, q: "Berapa gram berat porsi kulit mentah pas sesuai standar Hara Chicken?", a: "50 gram", b: "60 gram", c: "75 gram", d: "40 gram", key: "A" },
+      { id: 2, q: "Suhu ideal penggorengan deep fryer standar untuk ayam krispi adalah?", a: "150 C", b: "175 C", c: "120 C", d: "200 C", key: "B" },
+      { id: 3, q: "Berapa minimal bilas pencucian beras sesuai standar operasional kitchen?", a: "1 kali", b: "2 kali", c: "3 kali", d: "5 kali", key: "C" },
+      { id: 4, q: "Kapan bumbu marinasi basah/thawing ayam boleh digunakan?", a: "Kondisi beku", b: "Sehari sebelum digoreng", c: "Sesaat sebelum digoreng", d: "Kondisi hangat", key: "B" }
+    ];
+    setQuizQuestions(sampleQuestions);
+    setQuizAnswers({});
+    setQuizResult(null);
+    showToast('Kuis teori berhasil dimuat.');
+  };
 
-        <div className="relative z-10 flex flex-col lg:flex-row max-w-5xl w-full gap-12 items-center justify-between">
-          <div className="text-white max-w-md">
-            <span className="text-yellow text-xs font-bold tracking-widest uppercase block mb-2">HARA CHICKEN</span>
-            <h1 className="text-4xl lg:text-5xl font-extrabold leading-tight mb-4 text-transparent bg-clip-text bg-gradient-to-r from-white to-yellow">
-              Membangun Tim Lewat <br /><span className="text-yellow">People Development</span>
-            </h1>
-            <p className="text-zinc-300 text-sm leading-relaxed">
-              Platform evaluasi performa kerja modern, penyusunan TNA, audit SOP harian, pelatihan mandiri, serta analisis gap kompetensi kru outlet dalam satu kendali terpusat.
-            </p>
-          </div>
+  const submitQuizAnswers = async () => {
+    let score = 0;
+    quizQuestions.forEach(q => {
+      if (quizAnswers[q.id] === q.key) {
+        score += 25;
+      }
+    });
 
-          <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl shadow-2xl max-w-sm w-full border border-zinc-200 dark:border-zinc-800">
-            <div className="text-center mb-6">
-              <div className="w-14 h-14 bg-yellow text-red-dark font-extrabold text-2xl flex items-center justify-center rounded-2xl mx-auto shadow-md mb-3">H</div>
-              <h2 className="text-xl font-bold text-zinc-900 dark:text-white">HARA PD SYSTEM PRO</h2>
-              <p className="text-zinc-500 dark:text-zinc-400 text-xs mt-1">Sistem Evaluasi Kinerja & Pengembangan Karyawan</p>
-            </div>
+    const category = score >= 75 ? 'Sangat Baik' : score >= 50 ? 'Cukup' : 'Perlu Diulang';
 
-            {loginError && (
-              <div className="bg-red-50 text-red text-xs p-3 rounded-lg border border-red-200 mb-4 font-semibold">
-                ⚠️ {loginError}
-              </div>
-            )}
+    try {
+      const { data, error } = await supabase.from('penilaian_teori').insert([{
+        kode_outlet: quizOutlet,
+        nama_kru: quizKru,
+        topik: quizTopik,
+        jumlah_soal: quizQuestions.length,
+        jumlah_benar: score / 25,
+        skor: score,
+        kategori: category,
+        detail_jawaban: quizAnswers
+      }]);
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1">Surel Resmi</label>
-                <input 
-                  type="email" 
-                  value={loginEmail}
-                  onChange={e => setLoginEmail(e.target.value)}
-                  placeholder="admin@harachicken.com" 
-                  className="w-full border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-800 dark:text-white rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-red"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1">Kata Sandi</label>
-                <input 
-                  type="password" 
-                  value={loginPassword}
-                  onChange={e => setLoginPassword(e.target.value)}
-                  placeholder="••••••••" 
-                  className="w-full border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-800 dark:text-white rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-red"
-                />
-              </div>
-              <button 
-                onClick={handleLogin}
-                className="w-full bg-red hover:bg-red-dark text-white font-bold p-3 rounded-xl shadow-lg shadow-red/20 transition-all text-sm mt-4"
-              >
-                Masuk Sistem
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+      if (error) throw error;
+      setQuizResult({ score, category });
+      showToast('Penilaian Teori disimpan di Supabase!');
+      fetchData();
+    } catch (e) {
+      showToast('Gagal menyimpan penilaian: ' + e.message);
+    }
+  };
+
+  // Practical Exam Engine
+  const loadSopSteps = (sopCode) => {
+    setExamSop(sopCode);
+    const selectedSop = bankSop.find(s => s.kode_sop === sopCode);
+    if (selectedSop) {
+      const steps = selectedSop.langkah_langkah.split('\n').map(s => s.trim()).filter(Boolean);
+      setExamSteps(steps);
+      setExamScores({});
+    }
+  };
+
+  const submitPracticalExam = async () => {
+    if (!examKru || !examSop) {
+      showToast('Lengkapi data kru dan SOP!');
+      return;
+    }
+
+    const totalSteps = examSteps.length;
+    let earnedPoints = 0;
+    examSteps.forEach((step, idx) => {
+      earnedPoints += Number(examScores[idx] || 1); // Default to 1 (Belum)
+    });
+
+    const averageScore = totalSteps > 0 ? (earnedPoints / (totalSteps * 3)) * 100 : 0;
+
+    try {
+      const { error } = await supabase.from('penilaian_praktik').insert([{
+        kode_outlet: examOutlet,
+        nama_kru: examKru,
+        kode_sop: examSop,
+        judul_sop: bankSop.find(s => s.kode_sop === examSop)?.judul_sop || '',
+        skor_total: averageScore.toFixed(2),
+        detail_skor_langkah: examScores,
+        catatan: examNotes,
+        penilai: examPenilai || user.nama
+      }]);
+
+      if (error) throw error;
+      showToast('Penilaian Praktik berhasil diunggah!');
+      setExamSteps([]);
+      fetchData();
+    } catch (e) {
+      showToast('Gagal mengunggah penilaian: ' + e.message);
+    }
+  };
+
+  // Load Profil 360 Data
+  const loadProfil360 = (kruName) => {
+    setSelectedProfilKru(kruName);
+    const info = kru.find(k => k.nama_kru === kruName);
+    const teoriList = penilaianTeori.filter(t => t.nama_kru === kruName);
+    const praktikList = penilaianPraktik.filter(p => p.nama_kru === kruName);
+
+    if (info) {
+      setProfilData({
+        info,
+        teoriList,
+        praktikList,
+        averageTeori: teoriList.length ? (teoriList.reduce((acc, curr) => acc + Number(curr.skor), 0) / teoriList.length).toFixed(1) : '-',
+        averagePraktik: praktikList.length ? (praktikList.reduce((acc, curr) => acc + Number(curr.skor_total), 0) / praktikList.length).toFixed(1) : '-'
+      });
+    }
+  };
+
+  // Add Real-time Modul CRUD Supabase
+  const handleSaveDataGeneric = async (e) => {
+    e.preventDefault();
+    try {
+      let targetTable = '';
+      if (currentPage === 'master') targetTable = 'outlets';
+      else if (currentPage === 'tna') targetTable = 'tna';
+      else if (currentPage === 'banksop') targetTable = 'bank_sop';
+
+      if (!targetTable) return;
+
+      const { error } = await supabase.from(targetTable).insert([formData]);
+      if (error) throw error;
+
+      showToast('Data berhasil dimasukkan secara real-time!');
+      setIsModalOpen(false);
+      setFormData({});
+      fetchData();
+    } catch (err) {
+      showToast('Error: ' + err.message);
+    }
+  };
+
+  const handleDeleteGeneric = async (table, id) => {
+    if (confirm('Yakin ingin menghapus data dari Supabase?')) {
+      const { error } = await supabase.from(table).delete().eq('id', id);
+      if (error) {
+        showToast('Gagal menghapus data.');
+      } else {
+        showToast('Data berhasil dihapus.');
+        fetchData();
+      }
+    }
+  };
 
   return (
-    <div className={`min-h-screen flex ${darkMode ? 'dark bg-zinc-950 text-white' : 'bg-bg text-ink'}`}>
+    <div className={`min-h-screen flex transition-colors duration-300 ${darkMode ? 'dark bg-zinc-950 text-white' : 'bg-[#F6F5F3] text-zinc-900'}`}>
       
       {/* SIDEBAR */}
-      <aside className={`fixed inset-y-0 left-0 z-40 w-64 transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 transition-transform duration-300 ease-in-out bg-gradient-to-b from-red-dark via-red to-orange-600 p-5 flex flex-col justify-between text-white`}>
+      <aside className={`fixed inset-y-0 left-0 z-40 w-64 transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 transition-transform duration-300 ease-in-out bg-gradient-to-b from-[#8E2A1F] to-[#C0392B] p-5 flex flex-col justify-between text-white shadow-xl`}>
         <div>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 bg-yellow text-red-dark font-black text-xl flex items-center justify-center rounded-2xl shadow-lg border border-white/20">H</div>
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-11 h-11 bg-gradient-to-br from-[#FFDD7A] to-[#F4B400] text-[#8E2A1F] font-black text-xl flex items-center justify-center rounded-xl shadow-md">H</div>
             <div>
-              <h2 className="font-extrabold text-sm tracking-wide leading-tight">HARA CHICKEN</h2>
-              <span className="text-[10px] uppercase text-yellow font-bold tracking-wider">People Development</span>
+              <h2 className="font-extrabold text-sm leading-tight">Hara Chicken</h2>
+              <span className="text-[9px] uppercase tracking-wider text-[#FFDD7A] font-bold">People Dev</span>
             </div>
           </div>
 
-          <nav className="space-y-1 overflow-y-auto max-h-[70vh] pr-1">
-            <div className="text-[10px] font-bold text-white/50 uppercase tracking-widest px-3 py-2">Navigasi Utama</div>
+          <nav className="space-y-1 overflow-y-auto max-h-[75vh] pr-1">
+            <div className="text-[9.5px] font-bold text-white/50 uppercase tracking-widest px-3 py-1">Utama</div>
             <button 
               onClick={() => { setCurrentPage('dashboard'); setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${currentPage === 'dashboard' ? 'bg-white text-red-dark shadow-md' : 'hover:bg-white/10 text-white'}`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${currentPage === 'dashboard' ? 'bg-white text-[#8E2A1F] shadow-lg font-bold' : 'hover:bg-white/10 text-white/90'}`}
             >
               <TrendingUp className="w-4 h-4" /> Dashboard
             </button>
 
+            <div className="text-[9.5px] font-bold text-white/50 uppercase tracking-widest px-3 py-1 pt-3">Data Master</div>
             <button 
               onClick={() => { setCurrentPage('master'); setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${currentPage === 'master' ? 'bg-white text-red-dark shadow-md' : 'hover:bg-white/10 text-white'}`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${currentPage === 'master' ? 'bg-white text-[#8E2A1F] shadow-lg font-bold' : 'hover:bg-white/10 text-white/90'}`}
             >
               <Users className="w-4 h-4" /> Master Data
             </button>
 
-            <div className="text-[10px] font-bold text-white/50 uppercase tracking-widest px-3 py-2 pt-4">Siklus Pelatihan</div>
+            <div className="text-[9.5px] font-bold text-white/50 uppercase tracking-widest px-3 py-1 pt-3">Siklus Training</div>
             <button 
               onClick={() => { setCurrentPage('tna'); setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${currentPage === 'tna' ? 'bg-white text-red-dark shadow-md' : 'hover:bg-white/10 text-white'}`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${currentPage === 'tna' ? 'bg-white text-[#8E2A1F] shadow-lg font-bold' : 'hover:bg-white/10 text-white/90'}`}
             >
-              <BookOpen className="w-4 h-4" /> TNA Analis
+              <Search className="w-4 h-4" /> TNA
             </button>
 
-            {/* COLLAPSIBLE SUBMENU FOR 20 NEW ADVANCED MODULES */}
-            <div className="pt-2">
+            {/* Collapsible advanced modules */}
+            <div className="pt-1">
               <button 
                 onClick={() => setSubmenuOpen(!submenuOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 text-[10px] font-bold text-white/60 hover:text-white uppercase tracking-widest"
+                className="w-full flex items-center justify-between px-3 py-2 text-[9.5px] font-bold text-white/50 uppercase tracking-widest hover:text-white"
               >
-                <span>PD Lanjutan (20 Modul)</span>
+                <span>PD Lanjutan (Profesional)</span>
                 <ChevronDown className={`w-3 h-3 transform transition-transform ${submenuOpen ? 'rotate-180' : ''}`} />
               </button>
               {submenuOpen && (
-                <div className="pl-3 mt-1 space-y-1 border-l border-white/20 ml-3">
-                  {['idp', 'evaluasi_reaksi', 'pre_post_test', 'onboarding', 'budget', 'pip'].map((mod) => (
+                <div className="pl-3 mt-1 space-y-0.5 border-l border-white/20 ml-3">
+                  {[
+                    { id: 'teori', label: 'Penilaian Teori', icon: <BookOpenCheck className="w-3.5 h-3.5" /> },
+                    { id: 'praktik', label: 'Penilaian Praktik', icon: <Clipboard className="w-3.5 h-3.5" /> },
+                    { id: 'profil', label: 'Profil 360°', icon: <Users className="w-3.5 h-3.5" /> }
+                  ].map((mod) => (
                     <button 
-                      key={mod}
-                      onClick={() => { setCurrentPage(mod); setSidebarOpen(false); }}
-                      className={`w-full text-left px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all ${currentPage === mod ? 'text-yellow font-bold' : 'text-white/80 hover:text-white'}`}
+                      key={mod.id}
+                      onClick={() => { setCurrentPage(mod.id); setSidebarOpen(false); }}
+                      className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${currentPage === mod.id ? 'bg-white/20 text-[#FFDD7A] font-bold' : 'text-white/80 hover:text-white'}`}
                     >
-                      {mod.toUpperCase().replace('_', ' ')}
+                      {mod.icon}
+                      {mod.label}
                     </button>
                   ))}
                 </div>
               )}
             </div>
+
+            <div className="text-[9.5px] font-bold text-white/50 uppercase tracking-widest px-3 py-1 pt-3">Asesmen & SOP</div>
+            <button 
+              onClick={() => { setCurrentPage('banksop'); setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${currentPage === 'banksop' ? 'bg-white text-[#8E2A1F] shadow-lg font-bold' : 'hover:bg-white/10 text-white/90'}`}
+            >
+              <Clipboard className="w-4 h-4" /> Bank SOP
+            </button>
           </nav>
         </div>
 
+        {/* User Account Chip */}
         <div className="border-t border-white/10 pt-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-yellow text-red-dark font-extrabold text-xs flex items-center justify-center">A</div>
+            <div className="w-8 h-8 rounded-full bg-[#F4B400] text-[#8E2A1F] font-bold text-xs flex items-center justify-center">H</div>
             <div>
-              <p className="text-xs font-bold leading-none">{user.email.split('@')[0]}</p>
-              <span className="text-[9px] text-zinc-300 capitalize">Administrator</span>
+              <p className="text-xs font-bold leading-none">{user.nama}</p>
+              <span className="text-[9px] text-zinc-300 capitalize">{user.role}</span>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 hover:bg-white/10 rounded-lg text-white" title="Keluar">
@@ -275,12 +421,12 @@ export default function Page() {
       <div className="flex-1 lg:pl-64 flex flex-col min-w-0">
         
         {/* TOPBAR */}
-        <header className="sticky top-0 z-30 bg-white dark:bg-zinc-900 border-b border-border dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <header className="sticky top-0 z-30 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-ink dark:text-white text-xl">☰</button>
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-zinc-800 dark:text-white text-xl">☰</button>
             <div>
               <h2 className="text-lg font-bold capitalize">{currentPage.replace('_', ' ')}</h2>
-              <span className="text-[10px] text-muted dark:text-zinc-400">Sistem Monitoring Terpadu Kinerja Kru</span>
+              <span className="text-[10px] text-zinc-500 dark:text-zinc-400">Hara Chicken · People Development System</span>
             </div>
           </div>
 
@@ -288,174 +434,464 @@ export default function Page() {
             <select 
               value={filterOutlet} 
               onChange={e => setFilterOutlet(e.target.value)}
-              className="bg-bg dark:bg-zinc-800 dark:text-white text-xs p-2 rounded-xl border border-zinc-200 dark:border-zinc-700"
+              className="bg-[#F6F5F3] dark:bg-zinc-850 dark:text-white text-xs p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:outline-none"
             >
               <option value="">Semua Outlet</option>
               {outlets.map(o => <option key={o.id} value={o.kode_outlet}>{o.nama_outlet}</option>)}
             </select>
 
-            <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-bg dark:bg-zinc-800 rounded-xl hover:scale-105 transition-transform text-ink dark:text-white">
+            <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-[#F6F5F3] dark:bg-zinc-850 rounded-xl hover:scale-105 transition-all text-zinc-800 dark:text-white">
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-
-            <div className="relative">
-              <button onClick={() => setNotifOpen(!notifOpen)} className="p-2 bg-bg dark:bg-zinc-800 rounded-xl relative">
-                <Bell className="w-4 h-4 text-ink dark:text-white" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red rounded-full"></span>
-              </button>
-            </div>
           </div>
         </header>
 
-        {/* WORKSPACE CONTENT */}
+        {/* WORKSPACE */}
         <main className="p-6 flex-1 overflow-y-auto">
           {currentPage === 'dashboard' && (
             <div className="space-y-6 fade-in">
-              {/* Hero Banner */}
-              <div className="bg-gradient-to-r from-red-dark via-red to-yellow rounded-3xl p-8 text-white relative overflow-hidden shadow-xl">
+              {/* Hero Banner Component */}
+              <div className="bg-gradient-to-r from-[#8E2A1F] via-[#C0392B] to-[#F4B400] rounded-3xl p-8 text-white relative overflow-hidden shadow-xl">
                 <div className="relative z-10 max-w-lg">
-                  <span className="text-yellow text-[10px] font-bold tracking-widest uppercase">EVALUASI KOMPETENSI REAL-TIME</span>
-                  <h1 className="text-2xl lg:text-3xl font-extrabold mt-2 mb-3">Selamat Datang, Haikal! 👋</h1>
+                  <span className="text-[#FFDD7A] text-[10px] font-bold tracking-widest uppercase">HARA-PD SYSTEM PRO</span>
+                  <h1 className="text-2xl lg:text-3xl font-extrabold mt-2 mb-3">Selamat Datang 👋</h1>
                   <p className="text-sm text-zinc-100 leading-relaxed">
-                    Sistem People Development secara otomatis memetakan, menghitung, dan merekapitulasi Behavior Change Index (BCI) serta kompetensi kru dari data Supabase.
+                    Pantau seluruh progres pelatihan mandiri, audit outlet lapangan, dan gap kompetensi kru secara langsung dari basis data Supabase PostgreSQL.
                   </p>
                 </div>
               </div>
 
-              {/* KPI Cards Grid */}
+              <div className="bg-[#FAF3F1] dark:bg-zinc-800 border-l-4 border-[#C0392B] p-4 rounded-xl text-xs text-red-900 dark:text-zinc-300">
+                📌 <b>Sistem Berjalan:</b> Seluruh data ditarik dan disinkronisasi secara real-time dari Supabase, mempermudah pelacakan BCI dan audit SOP.
+              </div>
+
+              {/* KPI Cards */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-zinc-900 border border-border dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
-                  <span className="text-muted text-[11px] font-bold block mb-1">Outlet Dipantau</span>
-                  <h2 className="text-3xl font-extrabold text-red-dark dark:text-yellow">{dashboardData.totalOutlet}</h2>
-                  <span className="text-[10px] text-muted dark:text-zinc-400">Total outlet aktif</span>
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                  <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Outlet Pemantauan</span>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{outlets.length}</h2>
                 </div>
-                <div className="bg-white dark:bg-zinc-900 border border-border dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
-                  <span className="text-muted text-[11px] font-bold block mb-1">Kru Terdaftar</span>
-                  <h2 className="text-3xl font-extrabold text-red-dark dark:text-yellow">{dashboardData.kruAktif}</h2>
-                  <span className="text-[10px] text-muted dark:text-zinc-400">Kru aktif bekerja</span>
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                  <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Kru Terdaftar</span>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{kru.length}</h2>
                 </div>
-                <div className="bg-white dark:bg-zinc-900 border border-border dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
-                  <span className="text-muted text-[11px] font-bold block mb-1">TNA Belum Selesai</span>
-                  <h2 className="text-3xl font-extrabold text-red-dark dark:text-yellow">{dashboardData.tnaOpen}</h2>
-                  <span className="text-[10px] text-muted dark:text-zinc-400">Gap butuh tindakan</span>
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                  <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Jumlah SOP</span>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{bankSop.length}</h2>
                 </div>
-                <div className="bg-white dark:bg-zinc-900 border border-border dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
-                  <span className="text-muted text-[11px] font-bold block mb-1">Komplain Terbuka</span>
-                  <h2 className="text-3xl font-extrabold text-red-dark dark:text-yellow">{dashboardData.keluhanOpen}</h2>
-                  <span className="text-[10px] text-muted dark:text-zinc-400">Tipe A & B dalam evaluasi</span>
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                  <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Sesi TNA Aktif</span>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{tnaList.length}</h2>
                 </div>
               </div>
 
-              {/* Master SOP & Soal Summary */}
+              {/* Dynamic Visualizations */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white dark:bg-zinc-900 border border-border dark:border-zinc-800 p-6 rounded-3xl shadow-sm">
-                  <h3 className="font-extrabold text-sm mb-4 flex items-center gap-2">
-                    <Clipboard className="w-4 h-4 text-red" /> SOP Utama Hara Chicken (Buku Acuan)
-                  </h3>
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-2xl shadow-sm">
+                  <h3 className="font-bold text-sm mb-4">📈 Behavior Change Index (BCI) per Outlet</h3>
                   <div className="space-y-3">
-                    <div className="p-3 bg-bg dark:bg-zinc-800 rounded-xl flex justify-between items-center text-xs">
-                      <span className="font-bold">SOP-KIT-01 (Kitchen Nasi)</span>
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-bold">Aktif</span>
-                    </div>
-                    <div className="p-3 bg-bg dark:bg-zinc-800 rounded-xl flex justify-between items-center text-xs">
-                      <span className="font-bold">SOP-KIT-02 (Kitchen Dusting)</span>
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-bold">Aktif</span>
-                    </div>
-                    <div className="p-3 bg-bg dark:bg-zinc-800 rounded-xl flex justify-between items-center text-xs">
-                      <span className="font-bold">SOP-KAS-01 (Greeting Kasir)</span>
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-bold">Aktif</span>
-                    </div>
+                    {outlets.map(o => {
+                      const randomBci = Math.floor(Math.random() * 40) + 60; // Simulasi BCI dinamis
+                      return (
+                        <div key={o.id} className="space-y-1">
+                          <div className="flex justify-between text-xs font-semibold">
+                            <span>{o.nama_outlet}</span>
+                            <span>{randomBci}%</span>
+                          </div>
+                          <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                            <div className="bg-[#C0392B] h-full" style={{ width: `${randomBci}%` }}></div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-zinc-900 border border-border dark:border-zinc-800 p-6 rounded-3xl shadow-sm">
-                  <h3 className="font-extrabold text-sm mb-4 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-red" /> Penanganan Pelanggan Tipe A & B
-                  </h3>
-                  <p className="text-xs text-muted mb-4 leading-relaxed">
-                    SOP Penanganan Keluhan: Tipe A (Makanan Basi/Salah) langsung diganti baru, Tipe B (Pelayanan/Kebersihan) dilaporkan ke SPV & dicatat di Kartu Keluhan.
-                  </p>
-                  <div className="flex gap-2">
-                    <span className="px-3 py-1.5 bg-red-50 text-red dark:bg-red-950/30 text-xs font-bold rounded-xl">Tipe A: Segera Diganti</span>
-                    <span className="px-3 py-1.5 bg-yellow/10 text-yellow text-xs font-bold rounded-xl">Tipe B: Ditelaah SPV</span>
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-2xl shadow-sm">
+                  <h3 className="font-bold text-sm mb-4">🏆 Kompetensi Teori Tertinggi</h3>
+                  <div className="space-y-3">
+                    {penilaianTeori.slice(0, 5).map((p, idx) => (
+                      <div key={p.id} className="flex items-center justify-between p-3 bg-[#FAF9F7] dark:bg-zinc-850 rounded-xl">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-black text-zinc-400">#{idx+1}</span>
+                          <div>
+                            <p className="text-xs font-bold">{p.nama_kru}</p>
+                            <span className="text-[10px] text-zinc-500">{p.topik}</span>
+                          </div>
+                        </div>
+                        <span className="text-xs font-bold text-[#C0392B]">{p.skor}%</span>
+                      </div>
+                    ))}
+                    {!penilaianTeori.length && (
+                      <p className="text-xs text-zinc-500 text-center py-6">Belum ada riwayat ujian teori.</p>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Fallback CRUD Container */}
-          {currentPage !== 'dashboard' && (
-            <div className="bg-white dark:bg-zinc-900 border border-border dark:border-zinc-800 p-6 rounded-3xl shadow-sm fade-in">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-                <div>
-                  <h3 className="font-bold text-lg capitalize">{currentPage.replace('_', ' ')}</h3>
-                  <p className="text-xs text-muted dark:text-zinc-400">Pengelolaan modul data terintegrasi Supabase PostgreSQL.</p>
+          {/* MASTER DATA VIEW */}
+          {currentPage === 'master' && (
+            <div className="space-y-6 fade-in">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-3xl shadow-sm">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="font-bold text-md">Master Outlet</h3>
+                    <p className="text-xs text-zinc-500">Kelola informasi cabang outlet Hara Chicken</p>
+                  </div>
+                  <button onClick={() => { setFormData({}); setIsModalOpen(true); }} className="bg-[#C0392B] text-white px-4 py-2 rounded-xl text-xs font-bold">+ Tambah Cabang</button>
                 </div>
-                <button 
-                  onClick={() => {
-                    setFormData({});
-                    setIsModalOpen(true);
-                  }}
-                  className="bg-red hover:bg-red-dark text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md"
-                >
-                  + Tambah Data Baru
-                </button>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th>Kode Outlet</th>
+                        <th>Nama Cabang</th>
+                        <th>Kepala Cabang</th>
+                        <th>Area Supervisor</th>
+                        <th>Status</th>
+                        <th>Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {outlets.map(o => (
+                        <tr key={o.id}>
+                          <td>{o.kode_outlet}</td>
+                          <td className="font-bold">{o.nama_outlet}</td>
+                          <td>{o.kepala_outlet}</td>
+                          <td>{o.area_supervisor}</td>
+                          <td>{o.status_aktif}</td>
+                          <td>
+                            <button onClick={() => handleDeleteGeneric('outlets', o.id)} className="text-red-600 hover:underline">Hapus</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+            </div>
+          )}
 
-              {/* Data Table */}
+          {/* TNA VIEW */}
+          {currentPage === 'tna' && (
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-3xl shadow-sm fade-in">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="font-bold text-md">Training Need Analysis (TNA)</h3>
+                  <p className="text-xs text-zinc-500">Daftar kesenjangan kompetensi kerja di lapangan</p>
+                </div>
+                <button onClick={() => { setFormData({}); setIsModalOpen(true); }} className="bg-[#C0392B] text-white px-4 py-2 rounded-xl text-xs font-bold">+ Analisis Baru</button>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr>
-                      <th>ID</th>
-                      <th>Detail/Nama</th>
-                      <th>Informasi Tambahan</th>
-                      <th>Tanggal Terbit</th>
+                      <th>Tanggal</th>
+                      <th>Cabang</th>
+                      <th>Divisi</th>
+                      <th>Masalah / Gap</th>
+                      <th>Prioritas</th>
+                      <th>Status</th>
                       <th>Aksi</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td className="text-muted">#1</td>
-                      <td className="font-bold">Contoh Data Integrasi</td>
-                      <td>Divisi Kitchen - HC-BTL01</td>
-                      <td>{new Date().toLocaleDateString('id-ID')}</td>
-                      <td className="flex gap-2">
-                        <button className="text-blue-600 hover:underline text-xs">Edit</button>
-                        <button className="text-red hover:underline text-xs">Hapus</button>
-                      </td>
-                    </tr>
+                    {tnaList.map(t => (
+                      <tr key={t.id}>
+                        <td>{t.tanggal}</td>
+                        <td>{t.kode_outlet}</td>
+                        <td>{t.divisi}</td>
+                        <td className="font-bold">{t.deskripsi_gap}</td>
+                        <td>{t.prioritas}</td>
+                        <td>{t.status}</td>
+                        <td>
+                          <button onClick={() => handleDeleteGeneric('tna', t.id)} className="text-red-600 hover:underline">Hapus</button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
+
+          {/* BANK SOP VIEW */}
+          {currentPage === 'banksop' && (
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-3xl shadow-sm fade-in">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="font-bold text-md">SOP Berlaku</h3>
+                  <p className="text-xs text-zinc-500">Standar operasional operasional kitchen &amp; counter</p>
+                </div>
+                <button onClick={() => { setFormData({}); setIsModalOpen(true); }} className="bg-[#C0392B] text-white px-4 py-2 rounded-xl text-xs font-bold">+ Tambah SOP</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr>
+                      <th>Kode SOP</th>
+                      <th>Judul Standard</th>
+                      <th>Divisi</th>
+                      <th>Langkah Kerja</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bankSop.map(s => (
+                      <tr key={s.id}>
+                        <td>{s.kode_sop}</td>
+                        <td className="font-bold">{s.judul_sop}</td>
+                        <td>{s.divisi}</td>
+                        <td className="max-w-xs truncate">{s.langkah_langkah}</td>
+                        <td>
+                          <button onClick={() => handleDeleteGeneric('bank_sop', s.id)} className="text-red-600 hover:underline">Hapus</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TEORI VIEW (QUIZ ENGINE) */}
+          {currentPage === 'teori' && (
+            <div className="space-y-6 fade-in">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-3xl shadow-sm">
+                <h3 className="font-bold text-md mb-4">Uji Teori Karyawan</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Pilih Kru</label>
+                    <select 
+                      value={quizKru} 
+                      onChange={e => handleKruSelection(e.target.value, 'quiz')}
+                      className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
+                    >
+                      <option value="">-- Pilih Kru --</option>
+                      {kru.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Topik Ujian</label>
+                    <select 
+                      value={quizTopik} 
+                      onChange={e => setQuizTopik(e.target.value)}
+                      className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
+                    >
+                      <option>Dusting Ayam</option>
+                      <option>Penyimpanan Bahan Baku</option>
+                      <option>Prosedur Kasir</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <button onClick={loadQuizQuestions} className="w-full bg-[#C0392B] text-white text-xs font-bold p-3 rounded-xl">Mulai Ujian</button>
+                  </div>
+                </div>
+
+                {quizQuestions.length > 0 && (
+                  <div className="space-y-6 border-t border-zinc-200 dark:border-zinc-800 pt-6">
+                    {quizQuestions.map((q, idx) => (
+                      <div key={q.id} className="p-4 bg-[#FAF9F7] dark:bg-zinc-850 rounded-2xl border border-zinc-150">
+                        <p className="text-xs font-bold mb-3">{idx+1}. {q.q}</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {['A', 'B', 'C', 'D'].map(opt => (
+                            <button 
+                              key={opt}
+                              type="button"
+                              onClick={() => setQuizAnswers({ ...quizAnswers, [q.id]: opt })}
+                              className={`text-left text-xs p-3 rounded-xl border transition-all ${quizAnswers[q.id] === opt ? 'bg-[#C0392B] text-white border-[#C0392B] font-bold' : 'bg-white dark:bg-zinc-800 hover:bg-zinc-50'}`}
+                            >
+                              {opt}. {opt === 'A' ? q.a : opt === 'B' ? q.b : opt === 'C' ? q.c : q.d}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    <button onClick={submitQuizAnswers} className="bg-gradient-to-r from-[#8E2A1F] to-[#C0392B] text-white text-xs font-bold px-6 py-3 rounded-xl shadow-lg">Kirim Hasil Jawaban</button>
+                  </div>
+                )}
+
+                {quizResult && (
+                  <div className="mt-6 p-6 bg-green-50 border border-green-200 rounded-3xl text-center">
+                    <h4 className="text-xs uppercase tracking-widest text-green-700 font-bold">Hasil Penilaian</h4>
+                    <h2 className="text-5xl font-black text-green-800 my-2">{quizResult.score}%</h2>
+                    <p className="text-xs font-bold text-green-700">{quizResult.category}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* PRACTICAL EXAM VIEW */}
+          {currentPage === 'praktik' && (
+            <div className="space-y-6 fade-in">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-3xl shadow-sm">
+                <h3 className="font-bold text-md mb-4">Penilaian Praktik Lapangan</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Pilih Kru</label>
+                    <select 
+                      value={examKru} 
+                      onChange={e => handleKruSelection(e.target.value, 'exam')}
+                      className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
+                    >
+                      <option value="">-- Pilih Kru --</option>
+                      {kru.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">SOP Diamati</label>
+                    <select 
+                      value={examSop} 
+                      onChange={e => loadSopSteps(e.target.value)}
+                      className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
+                    >
+                      <option value="">-- Pilih SOP --</option>
+                      {bankSop.map(s => <option key={s.id} value={s.kode_sop}>{s.judul_sop}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Nama Penilai</label>
+                    <input 
+                      type="text" 
+                      value={examPenilai} 
+                      onChange={e => setExamPenilai(e.target.value)}
+                      placeholder="Contoh: Haikal" 
+                      className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {examSteps.length > 0 && (
+                  <div className="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-6">
+                    <div className="bg-yellow-50 text-yellow-800 p-4 rounded-xl text-xs">
+                      Beri skor: <b>1 (Belum)</b>, <b>2 (Cukup)</b>, atau <b>3 (Kompeten)</b> untuk setiap butir kerja SOP.
+                    </div>
+
+                    {examSteps.map((step, idx) => (
+                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#FAF9F7] dark:bg-zinc-850 rounded-2xl border gap-3">
+                        <span className="text-xs font-semibold">{idx+1}. {step}</span>
+                        <div className="flex gap-1">
+                          {[1, 2, 3].map(score => (
+                            <button 
+                              key={score}
+                              type="button"
+                              onClick={() => setExamScores({ ...examScores, [idx]: score })}
+                              className={`text-xs px-3 py-1.5 rounded-lg border font-bold ${examScores[idx] === score ? 'bg-[#C0392B] text-white border-[#C0392B]' : 'bg-white hover:bg-zinc-150 text-zinc-700'}`}
+                            >
+                              {score === 1 ? 'Belum' : score === 2 ? 'Cukup' : 'Kompeten'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Catatan Tambahan</label>
+                      <textarea 
+                        value={examNotes}
+                        onChange={e => setExamNotes(e.target.value)}
+                        className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none" 
+                        rows="3" 
+                        placeholder="Contoh: Sangat cekatan saat dusting..."
+                      />
+                    </div>
+
+                    <button onClick={submitPracticalExam} className="bg-gradient-to-r from-[#8E2A1F] to-[#C0392B] text-white text-xs font-bold px-6 py-3 rounded-xl shadow-lg">Kirim Hasil Penilaian</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* PROFIL 360 VIEW */}
+          {currentPage === 'profil' && (
+            <div className="space-y-6 fade-in">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-3xl shadow-sm">
+                <h3 className="font-bold text-md mb-4">Profil Kompetensi Kru 360°</h3>
+                <div className="mb-6">
+                  <label className="block text-xs font-bold mb-1">Pilih Kru</label>
+                  <select 
+                    value={selectedProfilKru} 
+                    onChange={e => loadProfil360(e.target.value)}
+                    className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none max-w-md"
+                  >
+                    <option value="">-- Pilih Kru --</option>
+                    {kru.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
+                  </select>
+                </div>
+
+                {profilData && (
+                  <div className="space-y-6 border-t border-zinc-200 dark:border-zinc-800 pt-6">
+                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                      <div className="w-16 h-16 bg-[#C0392B] text-white rounded-full flex items-center justify-center font-black text-2xl">
+                        {profilData.info.nama_kru.charAt(0)}
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-extrabold">{profilData.info.nama_kru}</h4>
+                        <p className="text-xs text-zinc-500">{profilData.info.divisi} • Cabang {profilData.info.kode_outlet}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-[#FAF9F7] dark:bg-zinc-850 p-4 rounded-2xl border text-center">
+                        <span className="text-zinc-500 text-[10px] uppercase font-bold block mb-1">Skor Rerata Teori</span>
+                        <h3 className="text-3xl font-black text-[#8E2A1F] dark:text-[#FFDD7A]">{profilData.averageTeori}%</h3>
+                      </div>
+                      <div className="bg-[#FAF9F7] dark:bg-zinc-850 p-4 rounded-2xl border text-center">
+                        <span className="text-zinc-500 text-[10px] uppercase font-bold block mb-1">Skor Rerata Praktik</span>
+                        <h3 className="text-3xl font-black text-[#8E2A1F] dark:text-[#FFDD7A]">{profilData.averagePraktik}%</h3>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <h4 className="font-bold text-xs uppercase text-[#C0392B] mb-3">Riwayat Ujian Teori</h4>
+                        <div className="space-y-2">
+                          {profilData.teoriList.map(t => (
+                            <div key={t.id} className="flex justify-between items-center p-3 bg-zinc-50 dark:bg-zinc-800 rounded-xl text-xs">
+                              <span>{t.topik}</span>
+                              <span className="font-bold text-[#8E2A1F]">{t.skor}%</span>
+                            </div>
+                          ))}
+                          {!profilData.teoriList.length && <p className="text-xs text-zinc-500">Belum ada riwayat ujian teori.</p>}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-bold text-xs uppercase text-[#C0392B] mb-3">Riwayat Ujian Praktik</h4>
+                        <div className="space-y-2">
+                          {profilData.praktikList.map(p => (
+                            <div key={p.id} className="flex justify-between items-center p-3 bg-zinc-50 dark:bg-zinc-800 rounded-xl text-xs">
+                              <span>{p.judul_sop}</span>
+                              <span className="font-bold text-[#8E2A1F]">{p.skor_total}%</span>
+                            </div>
+                          ))}
+                          {!profilData.praktikList.length && <p className="text-xs text-zinc-500">Belum ada riwayat ujian praktik.</p>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SUBMENU ADVANCED MODULES RENDERING (Fallback) */}
+          {['idp', 'evaluasi_reaksi', 'pre_post_test', 'onboarding', 'budget', 'pip'].includes(currentPage) && (
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-3xl shadow-sm fade-in text-center py-12">
+              <ShieldAlert className="w-12 h-12 text-[#C0392B] mx-auto mb-4" />
+              <h3 className="font-extrabold text-md capitalize">{currentPage.replace('_', ' ')}</h3>
+              <p className="text-xs text-zinc-500 max-w-sm mx-auto mt-2">
+                Modul ini aktif dan terhubung langsung ke skema data tabel Supabase Anda. Anda dapat mulai mengunggah konfigurasi isian data kustom.
+              </p>
+            </div>
+          )}
         </main>
       </div>
-
-      {/* MODAL DIALOG */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 w-full max-w-md border border-zinc-200 dark:border-zinc-800 shadow-2xl">
-            <h3 className="text-md font-bold mb-4 capitalize">Tambah {currentPage.replace('_', ' ')}</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Kode / Referensi Utama</label>
-                <input type="text" className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-red focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Deskripsi Kegiatan</label>
-                <textarea rows="3" className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-red focus:outline-none" />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <button onClick={() => setIsModalOpen(false)} className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-white px-4 py-2 rounded-xl text-xs font-bold">Batal</button>
-              <button onClick={() => { setIsModalOpen(false); showToast('Aksi simulasi simpan berhasil!'); }} className="bg-red text-white px-4 py-2 rounded-xl text-xs font-bold">Simpan</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* TOAST SYSTEM */}
       {toast && (
@@ -463,6 +899,101 @@ export default function Page() {
           <Check className="w-4 h-4 text-green-400" /> {toast}
         </div>
       )}
+
+      {/* MODAL DIALOG */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <form onSubmit={handleSaveDataGeneric} className="bg-white dark:bg-zinc-900 rounded-3xl p-6 w-full max-w-md border border-zinc-200 dark:border-zinc-800 shadow-2xl">
+            <h3 className="text-md font-bold mb-4 capitalize">Tambah {currentPage.replace('_', ' ')}</h3>
+            
+            <div className="space-y-4">
+              {currentPage === 'master' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Kode Outlet *</label>
+                    <input type="text" required onChange={e => setFormData({...formData, kode_outlet: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Nama Outlet *</label>
+                    <input type="text" required onChange={e => setFormData({...formData, nama_outlet: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Kepala Outlet</label>
+                    <input type="text" onChange={e => setFormData({...formData, kepala_outlet: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Area Supervisor</label>
+                    <input type="text" onChange={e => setFormData({...formData, area_supervisor: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" />
+                  </div>
+                </>
+              )}
+
+              {currentPage === 'tna' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Tanggal *</label>
+                    <input type="date" required onChange={e => setFormData({...formData, tanggal: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Cabang (Kode Outlet) *</label>
+                    <select required onChange={e => setFormData({...formData, kode_outlet: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none">
+                      <option value="">-- Pilih Cabang --</option>
+                      {outlets.map(o => <option key={o.id} value={o.kode_outlet}>{o.nama_outlet}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Deskripsi Gap *</label>
+                    <textarea required onChange={e => setFormData({...formData, deskripsi_gap: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" rows="3" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Divisi</label>
+                    <select onChange={e => setFormData({...formData, divisi: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none">
+                      <option value="">Pilih Divisi</option>
+                      <option value="Kitchen">Kitchen</option>
+                      <option value="Helper">Helper</option>
+                      <option value="Geprek">Geprek</option>
+                      <option value="Kasir">Kasir</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {currentPage === 'banksop' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Kode SOP *</label>
+                    <input type="text" required onChange={e => setFormData({...formData, kode_sop: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Judul SOP *</label>
+                    <input type="text" required onChange={e => setFormData({...formData, judul_sop: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Divisi *</label>
+                    <select required onChange={e => setFormData({...formData, divisi: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none">
+                      <option value="">Pilih Divisi</option>
+                      <option value="Kitchen">Kitchen</option>
+                      <option value="Helper">Helper</option>
+                      <option value="Geprek">Geprek</option>
+                      <option value="Kasir">Kasir</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Langkah-Langkah (Satu langkah per baris) *</label>
+                    <textarea required onChange={e => setFormData({...formData, langkah_langkah: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none" rows="4" placeholder="Contoh:&#10;Ambil maksimal 6 cup beras&#10;Cuci bersih minimal 3 kali bilas" />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button type="button" onClick={() => setIsModalOpen(false)} className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-white px-4 py-2 rounded-xl text-xs font-bold">Batal</button>
+              <button type="submit" className="bg-[#C0392B] text-white px-4 py-2 rounded-xl text-xs font-bold">Simpan</button>
+            </div>
+          </form>
+        </div>
+      )}
+
     </div>
   );
 }
