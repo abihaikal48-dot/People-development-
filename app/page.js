@@ -3,17 +3,18 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { 
-  TrendingUp, Users, Search, Bell, Moon, Sun, 
-  ChevronDown, BookOpen, Clipboard, AlertTriangle, 
-  Award, RefreshCw, Star, Trash2, Edit3, LogOut, Check,
-  BookOpenCheck, ShieldAlert, Calendar, HelpCircle, Settings,
-  DollarSign, FileText, CheckSquare, UserCheck, Briefcase
+  TrendingUp, Users, Search, Moon, Sun, 
+  ChevronDown, Clipboard, Trash2, LogOut, Check,
+  BookOpenCheck, ShieldAlert, Award, FileText, Settings
 } from 'lucide-react';
 
 export default function Page() {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [darkMode, setDarkMode] = useState(false);
-  const [user, setUser] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  
+  // Menggunakan default object agar tidak pernah bernilai null saat pra-render SSR
+  const [user, setUser] = useState({ nama: '', role: '', email: '' });
   const [loading, setLoading] = useState(true);
   
   // Login States
@@ -61,8 +62,11 @@ export default function Page() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [submenuOpen, setSubmenuOpen] = useState(true);
 
-  // SHA-256 Hashing Algorithm
+  // SHA-256 Hashing yang aman untuk Server-Side Environment
   const hashPassword = async (password) => {
+    if (typeof window === 'undefined' || !window.crypto) {
+      return '';
+    }
     const msgBuffer = new TextEncoder().encode(password);
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -70,12 +74,20 @@ export default function Page() {
   };
 
   useEffect(() => {
-    const savedUser = sessionStorage.getItem('haraPdUser');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      fetchData();
-    } else {
-      setLoading(false);
+    if (typeof window !== 'undefined') {
+      const savedUser = sessionStorage.getItem('haraPdUser');
+      if (savedUser) {
+        try {
+          const parsed = JSON.parse(savedUser);
+          setUser(parsed);
+          setIsLoggedIn(true);
+          fetchData();
+        } catch (e) {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
+      }
     }
   }, [filterOutlet, filterDivisi]);
 
@@ -103,8 +115,11 @@ export default function Page() {
         setLoading(false);
       } else {
         const loggedUser = { email: data.email, nama: data.nama, role: data.role };
-        sessionStorage.setItem('haraPdUser', JSON.stringify(loggedUser));
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('haraPdUser', JSON.stringify(loggedUser));
+        }
         setUser(loggedUser);
+        setIsLoggedIn(true);
         fetchData();
       }
     } catch (e) {
@@ -114,8 +129,11 @@ export default function Page() {
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem('haraPdUser');
-    setUser(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('haraPdUser');
+    }
+    setUser({ nama: '', role: '', email: '' });
+    setIsLoggedIn(false);
   };
 
   const showToast = (msg) => {
@@ -161,7 +179,6 @@ export default function Page() {
     }
   };
 
-  // Menangani perubahan data master kru / pengisian otomatis
   const handleKruSelection = (kruName, formType) => {
     const selectedKru = kru.find(k => k.nama_kru === kruName);
     if (selectedKru) {
@@ -181,7 +198,6 @@ export default function Page() {
       showToast('Pilih kru terlebih dahulu!');
       return;
     }
-    // Soal statis berdasarkan SOP / Buku Aturan Hara Chicken
     const sampleQuestions = [
       { id: 1, q: "Berapa gram berat porsi kulit mentah pas sesuai standar Hara Chicken?", a: "50 gram", b: "60 gram", c: "75 gram", d: "40 gram", key: "A" },
       { id: 2, q: "Suhu ideal penggorengan deep fryer standar untuk ayam krispi adalah?", a: "150 C", b: "175 C", c: "120 C", d: "200 C", key: "B" },
@@ -205,7 +221,7 @@ export default function Page() {
     const category = score >= 75 ? 'Sangat Baik' : score >= 50 ? 'Cukup' : 'Perlu Diulang';
 
     try {
-      const { data, error } = await supabase.from('penilaian_teori').insert([{
+      const { error } = await supabase.from('penilaian_teori').insert([{
         kode_outlet: quizOutlet,
         nama_kru: quizKru,
         topik: quizTopik,
@@ -230,7 +246,7 @@ export default function Page() {
     setExamSop(sopCode);
     const selectedSop = bankSop.find(s => s.kode_sop === sopCode);
     if (selectedSop) {
-      const steps = selectedSop.langkah_langkah.split('\n').map(s => s.trim()).filter(Boolean);
+      const steps = (selectedSop.langkah_langkah || '').split('\n').map(s => s.trim()).filter(Boolean);
       setExamSteps(steps);
       setExamScores({});
     }
@@ -245,7 +261,7 @@ export default function Page() {
     const totalSteps = examSteps.length;
     let earnedPoints = 0;
     examSteps.forEach((step, idx) => {
-      earnedPoints += Number(examScores[idx] || 1); // Default to 1 (Belum)
+      earnedPoints += Number(examScores[idx] || 1);
     });
 
     const averageScore = totalSteps > 0 ? (earnedPoints / (totalSteps * 3)) * 100 : 0;
@@ -289,7 +305,6 @@ export default function Page() {
     }
   };
 
-  // Add Real-time Modul CRUD Supabase
   const handleSaveDataGeneric = async (e) => {
     e.preventDefault();
     try {
@@ -323,6 +338,90 @@ export default function Page() {
       }
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-[#F6F5F3] dark:bg-zinc-950">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-[#C0392B] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-zinc-500 text-xs font-bold">Memuat Modul Hara PD Pro...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Jika belum login, tampilkan layar login
+  if (!isLoggedIn) {
+    return (
+      <div className={`relative min-h-screen flex items-center justify-center p-6 transition-colors duration-300 ${darkMode ? 'dark bg-zinc-950' : 'bg-[#1B0F0C]'}`}>
+        <div className="absolute inset-0 z-0 opacity-40">
+          <svg className="w-full h-full object-cover" viewBox="0 0 1400 500" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg">
+            <rect x="0" y="0" width="1400" height="500" fill="#2A130D" />
+            <circle cx="1180" cy="90" r="140" fill="#F4B400" opacity=".12" />
+            <circle cx="120" cy="60" r="90" fill="#F4B400" opacity=".08" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex flex-col lg:flex-row max-w-5xl w-full gap-12 items-center justify-between">
+          <div className="text-white max-w-lg">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-6 h-[2px] bg-[#F4B400]"></span>
+              <span className="text-xs uppercase tracking-widest text-[#F4B400] font-black">Hara Chicken</span>
+            </div>
+            <h1 className="text-3xl lg:text-4xl font-extrabold leading-tight mb-4">
+              Membangun Tim Lewat <br /><span className="text-[#F4B400]">People Development</span>
+            </h1>
+            <p className="text-zinc-300 text-sm leading-relaxed">
+              Satu platform terintegrasi untuk menyusun TNA, program pelatihan mandiri, audit standar operasional, hingga pencetakan laporan analisis kompetensi otomatis.
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl shadow-2xl max-w-sm w-full border border-zinc-200 dark:border-zinc-800">
+            <div className="text-center mb-6">
+              <div className="w-14 h-14 bg-[#F4B400] text-[#8E2A1F] font-black text-2xl flex items-center justify-center rounded-2xl mx-auto shadow-md mb-3">H</div>
+              <h2 className="text-lg font-extrabold text-zinc-900 dark:text-white">Hara Chicken</h2>
+              <p className="text-zinc-500 dark:text-zinc-400 text-xs">People Development System</p>
+            </div>
+
+            {loginError && (
+              <div className="bg-red-50 text-[#C0392B] text-xs p-3 rounded-xl border border-red-200 mb-4 font-semibold">
+                ⚠️ {loginError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1">Email</label>
+                <input 
+                  type="email" 
+                  value={loginEmail}
+                  onChange={e => setLoginEmail(e.target.value)}
+                  placeholder="nama@email.com" 
+                  className="w-full border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-800 dark:text-white rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-[#C0392B]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1">Password</label>
+                <input 
+                  type="password" 
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                  placeholder="••••••••" 
+                  className="w-full border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-800 dark:text-white rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-[#C0392B]"
+                />
+              </div>
+              <button 
+                onClick={handleLogin}
+                className="w-full bg-[#C0392B] hover:bg-[#8E2A1F] text-white font-bold p-3 rounded-xl shadow-lg transition-all text-xs mt-4"
+              >
+                Masuk
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen flex transition-colors duration-300 ${darkMode ? 'dark bg-zinc-950 text-white' : 'bg-[#F6F5F3] text-zinc-900'}`}>
@@ -407,15 +506,15 @@ export default function Page() {
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-[#F4B400] text-[#8E2A1F] font-bold text-xs flex items-center justify-center">H</div>
             <div>
-              <p className="text-xs font-bold leading-none">{user.nama}</p>
-              <span className="text-[9px] text-zinc-300 capitalize">{user.role}</span>
+              <p className="text-xs font-bold leading-none">{user?.nama}</p>
+              <span className="text-[9px] text-zinc-300 capitalize">{user?.role}</span>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 hover:bg-white/10 rounded-lg text-white" title="Keluar">
             <LogOut className="w-4 h-4" />
           </button>
         </div>
-      </aside>
+      </</aside>
 
       {/* MAIN CONTAINER */}
       <div className="flex-1 lg:pl-64 flex flex-col min-w-0">
@@ -437,7 +536,7 @@ export default function Page() {
               className="bg-[#F6F5F3] dark:bg-zinc-850 dark:text-white text-xs p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:outline-none"
             >
               <option value="">Semua Outlet</option>
-              {outlets.map(o => <option key={o.id} value={o.kode_outlet}>{o.nama_outlet}</option>)}
+              {outlets?.map(o => <option key={o.id} value={o.kode_outlet}>{o.nama_outlet}</option>)}
             </select>
 
             <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-[#F6F5F3] dark:bg-zinc-850 rounded-xl hover:scale-105 transition-all text-zinc-800 dark:text-white">
@@ -450,7 +549,6 @@ export default function Page() {
         <main className="p-6 flex-1 overflow-y-auto">
           {currentPage === 'dashboard' && (
             <div className="space-y-6 fade-in">
-              {/* Hero Banner Component */}
               <div className="bg-gradient-to-r from-[#8E2A1F] via-[#C0392B] to-[#F4B400] rounded-3xl p-8 text-white relative overflow-hidden shadow-xl">
                 <div className="relative z-10 max-w-lg">
                   <span className="text-[#FFDD7A] text-[10px] font-bold tracking-widest uppercase">HARA-PD SYSTEM PRO</span>
@@ -469,19 +567,19 @@ export default function Page() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
                   <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Outlet Pemantauan</span>
-                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{outlets.length}</h2>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{outlets?.length || 0}</h2>
                 </div>
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
                   <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Kru Terdaftar</span>
-                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{kru.length}</h2>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{kru?.length || 0}</h2>
                 </div>
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
                   <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Jumlah SOP</span>
-                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{bankSop.length}</h2>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{bankSop?.length || 0}</h2>
                 </div>
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
                   <span className="text-zinc-500 text-[11px] font-semibold block mb-1">Sesi TNA Aktif</span>
-                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{tnaList.length}</h2>
+                  <h2 className="text-3xl font-extrabold text-[#8E2A1F] dark:text-[#FFDD7A]">{tnaList?.length || 0}</h2>
                 </div>
               </div>
 
@@ -490,8 +588,8 @@ export default function Page() {
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-2xl shadow-sm">
                   <h3 className="font-bold text-sm mb-4">📈 Behavior Change Index (BCI) per Outlet</h3>
                   <div className="space-y-3">
-                    {outlets.map(o => {
-                      const randomBci = Math.floor(Math.random() * 40) + 60; // Simulasi BCI dinamis
+                    {outlets?.map(o => {
+                      const randomBci = Math.floor(Math.random() * 40) + 60;
                       return (
                         <div key={o.id} className="space-y-1">
                           <div className="flex justify-between text-xs font-semibold">
@@ -510,7 +608,7 @@ export default function Page() {
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-2xl shadow-sm">
                   <h3 className="font-bold text-sm mb-4">🏆 Kompetensi Teori Tertinggi</h3>
                   <div className="space-y-3">
-                    {penilaianTeori.slice(0, 5).map((p, idx) => (
+                    {penilaianTeori?.slice(0, 5).map((p, idx) => (
                       <div key={p.id} className="flex items-center justify-between p-3 bg-[#FAF9F7] dark:bg-zinc-850 rounded-xl">
                         <div className="flex items-center gap-3">
                           <span className="text-xs font-black text-zinc-400">#{idx+1}</span>
@@ -522,7 +620,7 @@ export default function Page() {
                         <span className="text-xs font-bold text-[#C0392B]">{p.skor}%</span>
                       </div>
                     ))}
-                    {!penilaianTeori.length && (
+                    {!penilaianTeori?.length && (
                       <p className="text-xs text-zinc-500 text-center py-6">Belum ada riwayat ujian teori.</p>
                     )}
                   </div>
@@ -555,7 +653,7 @@ export default function Page() {
                       </tr>
                     </thead>
                     <tbody>
-                      {outlets.map(o => (
+                      {outlets?.map(o => (
                         <tr key={o.id}>
                           <td>{o.kode_outlet}</td>
                           <td className="font-bold">{o.nama_outlet}</td>
@@ -598,7 +696,7 @@ export default function Page() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tnaList.map(t => (
+                    {tnaList?.map(t => (
                       <tr key={t.id}>
                         <td>{t.tanggal}</td>
                         <td>{t.kode_outlet}</td>
@@ -623,7 +721,7 @@ export default function Page() {
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h3 className="font-bold text-md">SOP Berlaku</h3>
-                  <p className="text-xs text-zinc-500">Standar operasional operasional kitchen &amp; counter</p>
+                  <p className="text-xs text-zinc-500">Standar operasional kitchen &amp; counter</p>
                 </div>
                 <button onClick={() => { setFormData({}); setIsModalOpen(true); }} className="bg-[#C0392B] text-white px-4 py-2 rounded-xl text-xs font-bold">+ Tambah SOP</button>
               </div>
@@ -639,7 +737,7 @@ export default function Page() {
                     </tr>
                   </thead>
                   <tbody>
-                    {bankSop.map(s => (
+                    {bankSop?.map(s => (
                       <tr key={s.id}>
                         <td>{s.kode_sop}</td>
                         <td className="font-bold">{s.judul_sop}</td>
@@ -670,7 +768,7 @@ export default function Page() {
                       className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
                     >
                       <option value="">-- Pilih Kru --</option>
-                      {kru.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
+                      {kru?.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
                     </select>
                   </div>
                   <div>
@@ -690,7 +788,7 @@ export default function Page() {
                   </div>
                 </div>
 
-                {quizQuestions.length > 0 && (
+                {quizQuestions?.length > 0 && (
                   <div className="space-y-6 border-t border-zinc-200 dark:border-zinc-800 pt-6">
                     {quizQuestions.map((q, idx) => (
                       <div key={q.id} className="p-4 bg-[#FAF9F7] dark:bg-zinc-850 rounded-2xl border border-zinc-150">
@@ -739,7 +837,7 @@ export default function Page() {
                       className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
                     >
                       <option value="">-- Pilih Kru --</option>
-                      {kru.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
+                      {kru?.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
                     </select>
                   </div>
                   <div>
@@ -750,7 +848,7 @@ export default function Page() {
                       className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none"
                     >
                       <option value="">-- Pilih SOP --</option>
-                      {bankSop.map(s => <option key={s.id} value={s.kode_sop}>{s.judul_sop}</option>)}
+                      {bankSop?.map(s => <option key={s.id} value={s.kode_sop}>{s.judul_sop}</option>)}
                     </select>
                   </div>
                   <div>
@@ -765,7 +863,7 @@ export default function Page() {
                   </div>
                 </div>
 
-                {examSteps.length > 0 && (
+                {examSteps?.length > 0 && (
                   <div className="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-6">
                     <div className="bg-yellow-50 text-yellow-800 p-4 rounded-xl text-xs">
                       Beri skor: <b>1 (Belum)</b>, <b>2 (Cukup)</b>, atau <b>3 (Kompeten)</b> untuk setiap butir kerja SOP.
@@ -820,7 +918,7 @@ export default function Page() {
                     className="w-full bg-[#F6F5F3] dark:bg-zinc-800 text-xs p-3 rounded-xl focus:outline-none max-w-md"
                   >
                     <option value="">-- Pilih Kru --</option>
-                    {kru.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
+                    {kru?.map(k => <option key={k.id} value={k.nama_kru}>{k.nama_kru} ({k.divisi})</option>)}
                   </select>
                 </div>
 
@@ -828,22 +926,22 @@ export default function Page() {
                   <div className="space-y-6 border-t border-zinc-200 dark:border-zinc-800 pt-6">
                     <div className="flex flex-col sm:flex-row items-center gap-4">
                       <div className="w-16 h-16 bg-[#C0392B] text-white rounded-full flex items-center justify-center font-black text-2xl">
-                        {profilData.info.nama_kru.charAt(0)}
+                        {profilData?.info?.nama_kru?.charAt(0) || '?'}
                       </div>
                       <div>
-                        <h4 className="text-lg font-extrabold">{profilData.info.nama_kru}</h4>
-                        <p className="text-xs text-zinc-500">{profilData.info.divisi} • Cabang {profilData.info.kode_outlet}</p>
+                        <h4 className="text-lg font-extrabold">{profilData?.info?.nama_kru}</h4>
+                        <p className="text-xs text-zinc-500">{profilData?.info?.divisi} • Cabang {profilData?.info?.kode_outlet}</p>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-[#FAF9F7] dark:bg-zinc-850 p-4 rounded-2xl border text-center">
                         <span className="text-zinc-500 text-[10px] uppercase font-bold block mb-1">Skor Rerata Teori</span>
-                        <h3 className="text-3xl font-black text-[#8E2A1F] dark:text-[#FFDD7A]">{profilData.averageTeori}%</h3>
+                        <h3 className="text-3xl font-black text-[#8E2A1F] dark:text-[#FFDD7A]">{profilData?.averageTeori}%</h3>
                       </div>
                       <div className="bg-[#FAF9F7] dark:bg-zinc-850 p-4 rounded-2xl border text-center">
                         <span className="text-zinc-500 text-[10px] uppercase font-bold block mb-1">Skor Rerata Praktik</span>
-                        <h3 className="text-3xl font-black text-[#8E2A1F] dark:text-[#FFDD7A]">{profilData.averagePraktik}%</h3>
+                        <h3 className="text-3xl font-black text-[#8E2A1F] dark:text-[#FFDD7A]">{profilData?.averagePraktik}%</h3>
                       </div>
                     </div>
 
@@ -851,26 +949,26 @@ export default function Page() {
                       <div>
                         <h4 className="font-bold text-xs uppercase text-[#C0392B] mb-3">Riwayat Ujian Teori</h4>
                         <div className="space-y-2">
-                          {profilData.teoriList.map(t => (
+                          {profilData?.teoriList?.map(t => (
                             <div key={t.id} className="flex justify-between items-center p-3 bg-zinc-50 dark:bg-zinc-800 rounded-xl text-xs">
                               <span>{t.topik}</span>
                               <span className="font-bold text-[#8E2A1F]">{t.skor}%</span>
                             </div>
                           ))}
-                          {!profilData.teoriList.length && <p className="text-xs text-zinc-500">Belum ada riwayat ujian teori.</p>}
+                          {!profilData?.teoriList?.length && <p className="text-xs text-zinc-500">Belum ada riwayat ujian teori.</p>}
                         </div>
                       </div>
 
                       <div>
                         <h4 className="font-bold text-xs uppercase text-[#C0392B] mb-3">Riwayat Ujian Praktik</h4>
                         <div className="space-y-2">
-                          {profilData.praktikList.map(p => (
+                          {profilData?.praktikList?.map(p => (
                             <div key={p.id} className="flex justify-between items-center p-3 bg-zinc-50 dark:bg-zinc-800 rounded-xl text-xs">
                               <span>{p.judul_sop}</span>
                               <span className="font-bold text-[#8E2A1F]">{p.skor_total}%</span>
                             </div>
                           ))}
-                          {!profilData.praktikList.length && <p className="text-xs text-zinc-500">Belum ada riwayat ujian praktik.</p>}
+                          {!profilData?.praktikList?.length && <p className="text-xs text-zinc-500">Belum ada riwayat ujian praktik.</p>}
                         </div>
                       </div>
                     </div>
@@ -938,7 +1036,7 @@ export default function Page() {
                     <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">Cabang (Kode Outlet) *</label>
                     <select required onChange={e => setFormData({...formData, kode_outlet: e.target.value})} className="w-full border border-zinc-200 dark:border-zinc-850 dark:bg-zinc-800 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-[#C0392B] focus:outline-none">
                       <option value="">-- Pilih Cabang --</option>
-                      {outlets.map(o => <option key={o.id} value={o.kode_outlet}>{o.nama_outlet}</option>)}
+                      {outlets?.map(o => <option key={o.id} value={o.kode_outlet}>{o.nama_outlet}</option>)}
                     </select>
                   </div>
                   <div>
